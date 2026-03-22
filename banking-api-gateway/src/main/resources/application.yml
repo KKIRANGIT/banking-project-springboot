@@ -7,6 +7,10 @@ spring:
   cloud:
     gateway:
       routes:
+        - id: auth-service
+          uri: lb://banking-payment-service
+          predicates:
+            - Path=/api/auth/**
         - id: payment-service
           uri: lb://banking-payment-service
           predicates:
@@ -31,18 +35,23 @@ eureka:
     register-with-eureka: true
     fetch-registry: true
 
-logging:
-  pattern:
-    level: "%5p [corr:%X{correlationId:-N/A}]"
-
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,gateway
+        include: health,info,gateway,metrics,prometheus
   endpoint:
     health:
       show-details: always
+      show-components: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      service: ${spring.application.name}
+  prometheus:
+    metrics:
+      export:
+        enabled: true
 
 info:
   app:

@@ -39,6 +39,10 @@ eureka:
     register-with-eureka: false
     fetch-registry: false
 
+monitoring:
+  kafka:
+    enabled: false
+
 management:
   health:
     redis:

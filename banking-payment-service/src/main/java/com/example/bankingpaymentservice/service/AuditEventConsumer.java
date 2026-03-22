@@ -4,19 +4,22 @@ import com.example.bankingpaymentservice.config.KafkaConfig;
 import com.example.bankingpaymentservice.kafka.TransactionEvent;
 import com.example.bankingpaymentservice.model.AuditLog;
 import com.example.bankingpaymentservice.repository.AuditLogRepository;
+import com.example.bankingpaymentservice.util.SensitiveDataMasker;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.annotation.Timed;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 @Component
+@Timed(value = "payment.component.execution", histogram = true)
 public class AuditEventConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(AuditEventConsumer.class);
@@ -53,8 +56,8 @@ public class AuditEventConsumer {
         auditLogRepository.save(auditLog);
 
         log.info(
-                "Audit event consumed for account {} on topic {}",
-                event.getAccountNumber(),
+                "Audit event consumed for account={} topic={}",
+                SensitiveDataMasker.maskAccountNumber(event.getAccountNumber()),
                 topic
         );
     }
@@ -65,9 +68,9 @@ public class AuditEventConsumer {
             @Header(KafkaHeaders.RECEIVED_TOPIC) String topic
     ) {
         log.error(
-                "Audit event moved to DLT topic {} for account {} and transaction {}",
+                "Audit event moved to dead-letter topic={} account={} transactionId={}",
                 topic,
-                event.getAccountNumber(),
+                SensitiveDataMasker.maskAccountNumber(event.getAccountNumber()),
                 event.getTransactionId()
         );
     }

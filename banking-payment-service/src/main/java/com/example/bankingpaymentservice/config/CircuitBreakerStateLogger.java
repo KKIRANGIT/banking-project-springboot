@@ -22,7 +22,7 @@ public class CircuitBreakerStateLogger {
         circuitBreakerRegistry.circuitBreaker("accountService")
                 .getEventPublisher()
                 .onStateTransition(event -> log.info(
-                        "Circuit breaker {} state changed from {} to {}",
+                        "Circuit breaker name={} fromState={} toState={}",
                         event.getCircuitBreakerName(),
                         event.getStateTransition().getFromState(),
                         event.getStateTransition().getToState()

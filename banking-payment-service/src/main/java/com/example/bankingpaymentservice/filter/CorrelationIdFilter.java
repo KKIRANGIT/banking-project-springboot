@@ -34,8 +34,7 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
         response.setHeader(CORRELATION_ID_HEADER, correlationId);
 
         try {
-            LOGGER.info("Payment service request {} {} correlationId={}",
-                    request.getMethod(), request.getRequestURI(), correlationId);
+            LOGGER.info("Incoming request method={} path={}", request.getMethod(), request.getRequestURI());
             filterChain.doFilter(request, response);
         } finally {
             MDC.remove(MDC_KEY);

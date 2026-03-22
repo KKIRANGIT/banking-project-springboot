@@ -33,7 +33,7 @@ public class SecurityConfig {
                                 response.sendError(HttpServletResponse.SC_FORBIDDEN, "Forbidden"))
                 )
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/accounts/**").hasAnyRole("CUSTOMER", "TELLER", "ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/accounts/**").hasAnyRole("TELLER", "ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/accounts/**").hasAnyRole("TELLER", "ADMIN")

@@ -9,11 +9,13 @@ import com.example.bankingpaymentservice.exception.UserAlreadyExistsException;
 import com.example.bankingpaymentservice.model.User;
 import com.example.bankingpaymentservice.repository.UserRepository;
 import com.example.bankingpaymentservice.security.JwtTokenProvider;
+import io.micrometer.core.annotation.Timed;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@Timed(value = "payment.service.execution", histogram = true)
 @Transactional(readOnly = true)
 public class AuthService {
 

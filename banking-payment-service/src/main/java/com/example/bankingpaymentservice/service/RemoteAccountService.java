@@ -5,15 +5,18 @@ import com.example.bankingpaymentservice.dto.AccountBalanceUpdateRequest;
 import com.example.bankingpaymentservice.dto.AccountResponse;
 import com.example.bankingpaymentservice.exception.AccountClientNotFoundException;
 import com.example.bankingpaymentservice.model.AccountStatus;
+import com.example.bankingpaymentservice.util.SensitiveDataMasker;
 import feign.FeignException;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
+import io.micrometer.core.annotation.Timed;
 import java.math.BigDecimal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
+@Timed(value = "payment.service.execution", histogram = true)
 public class RemoteAccountService {
 
     private static final Logger log = LoggerFactory.getLogger(RemoteAccountService.class);
@@ -46,15 +49,19 @@ public class RemoteAccountService {
 
     @SuppressWarnings("unused")
     private AccountResponse getAccountFallback(String accountNumber, Throwable throwable) {
-        log.warn("Account lookup fallback triggered for {} because {}", accountNumber, throwable.toString());
+        log.warn(
+                "Account lookup fallback account={} reason={}",
+                SensitiveDataMasker.maskAccountNumber(accountNumber),
+                throwable.toString()
+        );
         return unknownAccount(accountNumber);
     }
 
     @SuppressWarnings("unused")
     private AccountResponse updateBalanceFallback(String accountNumber, BigDecimal amount, Throwable throwable) {
         log.warn(
-                "Account balance fallback triggered for {} and amount {} because {}",
-                accountNumber,
+                "Account balance fallback account={} amount={} reason={}",
+                SensitiveDataMasker.maskAccountNumber(accountNumber),
                 amount,
                 throwable.toString()
         );

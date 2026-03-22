@@ -1,5 +1,7 @@
 package com.example.bankingpaymentservice.service;
 
+import com.example.bankingpaymentservice.util.SensitiveDataMasker;
+import io.micrometer.core.annotation.Timed;
 import java.util.concurrent.CompletableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -7,6 +9,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 @Service
+@Timed(value = "payment.service.execution", histogram = true)
 public class SanctionsCheckService {
 
     private static final Logger log = LoggerFactory.getLogger(SanctionsCheckService.class);
@@ -14,9 +17,10 @@ public class SanctionsCheckService {
     @Async("transactionProcessingExecutor")
     public CompletableFuture<Boolean> checkSanctions(String accountNumber) {
         String threadName = Thread.currentThread().getName();
-        log.info(
-                "Starting sanctions check for account {} on thread {}",
-                accountNumber,
+        String maskedAccountNumber = SensitiveDataMasker.maskAccountNumber(accountNumber);
+        log.debug(
+                "Starting sanctions check account={} thread={}",
+                maskedAccountNumber,
                 threadName
         );
 
@@ -25,9 +29,9 @@ public class SanctionsCheckService {
         boolean isSanctioned = accountNumber.startsWith("SAN")
                 || accountNumber.endsWith("000");
 
-        log.info(
-                "Completed sanctions check for account {} with result {} on thread {}",
-                accountNumber,
+        log.debug(
+                "Completed sanctions check account={} result={} thread={}",
+                maskedAccountNumber,
                 isSanctioned,
                 threadName
         );

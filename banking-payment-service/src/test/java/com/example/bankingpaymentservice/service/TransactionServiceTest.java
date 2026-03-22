@@ -15,6 +15,7 @@ import com.example.bankingpaymentservice.exception.InsufficientFundsException;
 import com.example.bankingpaymentservice.exception.InvalidTransactionException;
 import com.example.bankingpaymentservice.exception.TransactionNotFoundException;
 import com.example.bankingpaymentservice.exception.TransactionProcessingException;
+import com.example.bankingpaymentservice.metrics.TransactionMetricsService;
 import com.example.bankingpaymentservice.model.Account;
 import com.example.bankingpaymentservice.model.AccountStatus;
 import com.example.bankingpaymentservice.model.Transaction;
@@ -60,6 +61,9 @@ class TransactionServiceTest {
     @Mock
     private TransactionEventProducer transactionEventProducer;
 
+    @Mock
+    private TransactionMetricsService transactionMetricsService;
+
     @InjectMocks
     private TransactionService transactionService;
 
@@ -72,6 +76,7 @@ class TransactionServiceTest {
                 fraudCheckService,
                 sanctionsCheckService,
                 transactionEventProducer,
+                transactionMetricsService,
                 FIXED_CLOCK
         );
     }
@@ -101,6 +106,7 @@ class TransactionServiceTest {
         assertThat(response.getStatus()).isEqualTo(TransactionStatus.SUCCESS);
         assertThat(response.getCreatedAt()).isEqualTo(LocalDateTime.of(2026, 3, 22, 10, 15, 30));
 
+        verify(transactionMetricsService).incrementCreated();
         verify(transactionEventProducer).publishTransactionInitiated(any(Transaction.class));
         verify(transactionEventProducer).publishTransactionCompleted(any(Transaction.class));
         verify(transactionEventProducer, never()).publishTransactionFailed(any(Transaction.class));
@@ -152,6 +158,8 @@ class TransactionServiceTest {
         TransactionResponse response = transactionService.createTransaction(request);
 
         assertThat(response.getStatus()).isEqualTo(TransactionStatus.FAILED);
+        verify(transactionMetricsService).incrementCreated();
+        verify(transactionMetricsService).incrementFailed();
         verify(remoteAccountService, never()).updateBalance(any(), any());
         verify(transactionEventProducer).publishTransactionInitiated(any(Transaction.class));
         verify(transactionEventProducer).publishTransactionFailed(any(Transaction.class));
@@ -174,6 +182,7 @@ class TransactionServiceTest {
         TransactionResponse response = transactionService.createTransaction(request);
 
         assertThat(response.getStatus()).isEqualTo(TransactionStatus.PENDING);
+        verify(transactionMetricsService).incrementCreated();
         verify(transactionEventProducer).publishTransactionInitiated(any(Transaction.class));
         verify(transactionEventProducer, never()).publishTransactionCompleted(any(Transaction.class));
         verify(transactionEventProducer, never()).publishTransactionFailed(any(Transaction.class));
@@ -197,6 +206,8 @@ class TransactionServiceTest {
                 .isInstanceOf(TransactionProcessingException.class)
                 .hasMessageContaining("Account service is unavailable for account number: ACC1001");
 
+        verify(transactionMetricsService).incrementCreated();
+        verify(transactionMetricsService).incrementFailed();
         verify(transactionEventProducer).publishTransactionFailed(any(Transaction.class));
         verify(transactionEventProducer, never()).publishTransactionCompleted(any(Transaction.class));
     }

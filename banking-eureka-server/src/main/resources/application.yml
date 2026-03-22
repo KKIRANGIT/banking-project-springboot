@@ -5,18 +5,23 @@ spring:
   application:
     name: banking-eureka-server
 
-logging:
-  pattern:
-    level: "%5p [corr:%X{correlationId:-N/A}]"
-
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always
+      show-components: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      service: ${spring.application.name}
+  prometheus:
+    metrics:
+      export:
+        enabled: true
 
 info:
   app:

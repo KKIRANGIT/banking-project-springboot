@@ -54,6 +54,14 @@ eureka:
     register-with-eureka: true
     fetch-registry: true
 
+monitoring:
+  kafka:
+    enabled: true
+    consumer-groups:
+      - audit-service-group
+      - notification-service-group
+    lag-refresh-ms: 15000
+
 resilience4j:
   retry:
     instances:
@@ -89,18 +97,28 @@ resilience4j:
         ignore-exceptions:
           - com.example.bankingpaymentservice.exception.AccountClientNotFoundException
 
-logging:
-  pattern:
-    level: "%5p [corr:%X{correlationId:-N/A}]"
-
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,cacheevict,circuitbreakers,circuitbreakerevents,retries,retryevents
+        include: health,info,metrics,prometheus,cacheevict,circuitbreakers,circuitbreakerevents,retries,retryevents
   endpoint:
     health:
-      show-details: when_authorized
+      show-details: always
+      show-components: always
+  health:
+    db:
+      enabled: false
+    kafka:
+      enabled: false
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      service: ${spring.application.name}
+  prometheus:
+    metrics:
+      export:
+        enabled: true
 
 info:
   app:
@@ -119,11 +137,6 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     show-sql: true
-
-logging:
-  level:
-    org.hibernate.SQL: DEBUG
-    org.hibernate.orm.jdbc.bind: TRACE
 
 ---
 spring:

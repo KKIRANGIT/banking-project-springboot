@@ -8,12 +8,15 @@ import com.example.bankingpaymentservice.exception.InsufficientFundsException;
 import com.example.bankingpaymentservice.exception.InvalidTransactionException;
 import com.example.bankingpaymentservice.exception.TransactionNotFoundException;
 import com.example.bankingpaymentservice.exception.TransactionProcessingException;
+import com.example.bankingpaymentservice.metrics.TransactionMetricsService;
 import com.example.bankingpaymentservice.model.Account;
 import com.example.bankingpaymentservice.model.AccountStatus;
 import com.example.bankingpaymentservice.model.Transaction;
 import com.example.bankingpaymentservice.model.TransactionStatus;
 import com.example.bankingpaymentservice.model.TransactionType;
 import com.example.bankingpaymentservice.repository.TransactionRepository;
+import com.example.bankingpaymentservice.util.SensitiveDataMasker;
+import io.micrometer.core.annotation.Timed;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -30,6 +33,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@Timed(value = "payment.service.execution", histogram = true)
 @Transactional(readOnly = true)
 public class TransactionService {
 
@@ -42,6 +46,7 @@ public class TransactionService {
     private final FraudCheckService fraudCheckService;
     private final SanctionsCheckService sanctionsCheckService;
     private final TransactionEventProducer transactionEventProducer;
+    private final TransactionMetricsService transactionMetricsService;
     private final Clock clock;
 
     public TransactionService(
@@ -51,6 +56,7 @@ public class TransactionService {
             FraudCheckService fraudCheckService,
             SanctionsCheckService sanctionsCheckService,
             TransactionEventProducer transactionEventProducer,
+            TransactionMetricsService transactionMetricsService,
             Clock clock
     ) {
         this.transactionRepository = transactionRepository;
@@ -59,92 +65,97 @@ public class TransactionService {
         this.fraudCheckService = fraudCheckService;
         this.sanctionsCheckService = sanctionsCheckService;
         this.transactionEventProducer = transactionEventProducer;
+        this.transactionMetricsService = transactionMetricsService;
         this.clock = clock;
     }
 
+    @Timed(value = "transaction.processing.time", histogram = true, percentiles = {0.5, 0.95, 0.99})
     @Transactional
     public TransactionResponse createTransaction(TransactionRequest request) {
-        validateBusinessRules(request);
-
-        String accountNumber = request.getAccountNumber().trim();
-        AccountResponse remoteAccount = fetchVerifiedActiveAccount(accountNumber);
-        Account account = accountService.syncAccountSnapshot(remoteAccount);
-
-        BigDecimal amount = request.getAmount();
-        if (request.getType() == TransactionType.DEBIT && remoteAccount.getBalance().compareTo(amount) < 0) {
-            throw new InsufficientFundsException("Insufficient funds for account " + accountNumber);
-        }
-
-        Transaction transaction = new Transaction(
-                account,
-                amount,
-                DEFAULT_CURRENCY,
-                request.getType(),
-                TransactionStatus.PENDING,
-                LocalDateTime.now(clock)
-        );
-        transaction = transactionRepository.saveAndFlush(transaction);
-        transactionEventProducer.publishTransactionInitiated(transaction);
-
+        boolean failureMetricRecorded = false;
+        Transaction transaction = null;
         try {
-            CompletableFuture<Boolean> fraudFuture = fraudCheckService.checkFraud(transaction);
-            CompletableFuture<Boolean> sanctionsFuture = sanctionsCheckService.checkSanctions(accountNumber);
+            validateBusinessRules(request);
 
-            CompletableFuture.allOf(fraudFuture, sanctionsFuture)
-                    .orTimeout(3, TimeUnit.SECONDS)
-                    .join();
+            String accountNumber = request.getAccountNumber().trim();
+            String maskedAccountNumber = SensitiveDataMasker.maskAccountNumber(accountNumber);
+            AccountResponse remoteAccount = fetchVerifiedActiveAccount(accountNumber);
+            Account account = accountService.syncAccountSnapshot(remoteAccount);
 
-            boolean isFraudulent = fraudFuture.join();
-            boolean isSanctioned = sanctionsFuture.join();
+            BigDecimal amount = request.getAmount();
+            if (request.getType() == TransactionType.DEBIT && remoteAccount.getBalance().compareTo(amount) < 0) {
+                throw new InsufficientFundsException("Insufficient funds for account " + accountNumber);
+            }
 
-            if (isFraudulent || isSanctioned) {
-                transaction.setStatus(TransactionStatus.FAILED);
-                transaction = transactionRepository.saveAndFlush(transaction);
-                transactionEventProducer.publishTransactionFailed(transaction);
-                log.info(
-                        "Transaction for account {} marked FAILED on thread {}",
-                        accountNumber,
-                        Thread.currentThread().getName()
-                );
-            } else {
-                try {
-                    AccountResponse updatedRemoteAccount = remoteAccountService.updateBalance(
-                            accountNumber,
-                            calculateBalanceDelta(amount, request.getType())
-                    );
-                    ensureAccountServiceAvailable(updatedRemoteAccount, accountNumber);
-                    account = accountService.syncAccountSnapshot(updatedRemoteAccount);
-                    transaction.setAccount(account);
-                    transaction.setStatus(TransactionStatus.SUCCESS);
-                    transaction = transactionRepository.saveAndFlush(transaction);
-                    transactionEventProducer.publishTransactionCompleted(transaction);
-                    log.info(
-                            "Transaction for account {} marked SUCCESS on thread {}",
-                            accountNumber,
-                            Thread.currentThread().getName()
-                    );
-                } catch (TransactionProcessingException exception) {
+            transaction = new Transaction(
+                    account,
+                    amount,
+                    DEFAULT_CURRENCY,
+                    request.getType(),
+                    TransactionStatus.PENDING,
+                    LocalDateTime.now(clock)
+            );
+            transaction = transactionRepository.saveAndFlush(transaction);
+            transactionMetricsService.incrementCreated();
+            transactionEventProducer.publishTransactionInitiated(transaction);
+
+            try {
+                CompletableFuture<Boolean> fraudFuture = fraudCheckService.checkFraud(transaction);
+                CompletableFuture<Boolean> sanctionsFuture = sanctionsCheckService.checkSanctions(accountNumber);
+
+                CompletableFuture.allOf(fraudFuture, sanctionsFuture)
+                        .orTimeout(3, TimeUnit.SECONDS)
+                        .join();
+
+                boolean isFraudulent = fraudFuture.join();
+                boolean isSanctioned = sanctionsFuture.join();
+
+                if (isFraudulent || isSanctioned) {
                     transaction.setStatus(TransactionStatus.FAILED);
                     transaction = transactionRepository.saveAndFlush(transaction);
+                    transactionMetricsService.incrementFailed();
+                    failureMetricRecorded = true;
                     transactionEventProducer.publishTransactionFailed(transaction);
+                    log.info("Transaction marked FAILED account={} thread={}", maskedAccountNumber, Thread.currentThread().getName());
+                } else {
+                    try {
+                        AccountResponse updatedRemoteAccount = remoteAccountService.updateBalance(
+                                accountNumber,
+                                calculateBalanceDelta(amount, request.getType())
+                        );
+                        ensureAccountServiceAvailable(updatedRemoteAccount, accountNumber);
+                        account = accountService.syncAccountSnapshot(updatedRemoteAccount);
+                        transaction.setAccount(account);
+                        transaction.setStatus(TransactionStatus.SUCCESS);
+                        transaction = transactionRepository.saveAndFlush(transaction);
+                        transactionEventProducer.publishTransactionCompleted(transaction);
+                        log.info("Transaction marked SUCCESS account={} thread={}", maskedAccountNumber, Thread.currentThread().getName());
+                    } catch (TransactionProcessingException exception) {
+                        transaction.setStatus(TransactionStatus.FAILED);
+                        transaction = transactionRepository.saveAndFlush(transaction);
+                        transactionMetricsService.incrementFailed();
+                        failureMetricRecorded = true;
+                        transactionEventProducer.publishTransactionFailed(transaction);
+                        throw exception;
+                    }
+                }
+            } catch (CompletionException exception) {
+                if (exception.getCause() instanceof TimeoutException) {
+                    transaction.setStatus(TransactionStatus.PENDING);
+                    transaction = transactionRepository.saveAndFlush(transaction);
+                    log.warn("Transaction checks timed out account={} thread={}", maskedAccountNumber, Thread.currentThread().getName());
+                } else {
                     throw exception;
                 }
             }
-        } catch (CompletionException exception) {
-            if (exception.getCause() instanceof TimeoutException) {
-                transaction.setStatus(TransactionStatus.PENDING);
-                transaction = transactionRepository.saveAndFlush(transaction);
-                log.warn(
-                        "Transaction checks timed out for account {}. Saving as PENDING on thread {}",
-                        accountNumber,
-                        Thread.currentThread().getName()
-                );
-            } else {
-                throw exception;
-            }
-        }
 
-        return toResponse(transaction);
+            return toResponse(transaction);
+        } catch (RuntimeException exception) {
+            if (!failureMetricRecorded) {
+                transactionMetricsService.incrementFailed();
+            }
+            throw exception;
+        }
     }
 
     public List<TransactionResponse> getAllTransactions() {
@@ -195,22 +206,22 @@ public class TransactionService {
     }
 
     public void demonstrateNPlusOneProblem() {
-        log.info("N+1 demo: loading transactions without JOIN FETCH");
+        log.info("N+1 demo loading transactions without JOIN FETCH");
         List<Transaction> transactions = transactionRepository.findAll();
         transactions.forEach(transaction -> log.info(
-                "Transaction {} belongs to account {}",
+                "TransactionId={} account={}",
                 transaction.getId(),
-                transaction.getAccount().getAccountNumber()
+                SensitiveDataMasker.maskAccountNumber(transaction.getAccount().getAccountNumber())
         ));
     }
 
     public void demonstrateJoinFetchFix() {
-        log.info("JOIN FETCH demo: loading transactions with account in one query");
+        log.info("JOIN FETCH demo loading transactions with account in one query");
         List<Transaction> transactions = transactionRepository.findAllWithAccount();
         transactions.forEach(transaction -> log.info(
-                "Transaction {} belongs to account {}",
+                "TransactionId={} account={}",
                 transaction.getId(),
-                transaction.getAccount().getAccountNumber()
+                SensitiveDataMasker.maskAccountNumber(transaction.getAccount().getAccountNumber())
         ));
     }
 

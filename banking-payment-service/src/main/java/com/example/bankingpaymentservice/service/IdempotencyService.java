@@ -3,12 +3,14 @@ package com.example.bankingpaymentservice.service;
 import com.example.bankingpaymentservice.dto.TransactionResponse;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.annotation.Timed;
 import java.time.Duration;
 import java.util.Optional;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
+@Timed(value = "payment.service.execution", histogram = true)
 public class IdempotencyService {
 
     private static final String KEY_PREFIX = "idempotency:transactions:";

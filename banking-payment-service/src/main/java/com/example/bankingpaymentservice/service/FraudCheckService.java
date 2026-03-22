@@ -1,6 +1,8 @@
 package com.example.bankingpaymentservice.service;
 
 import com.example.bankingpaymentservice.model.Transaction;
+import com.example.bankingpaymentservice.util.SensitiveDataMasker;
+import io.micrometer.core.annotation.Timed;
 import java.util.concurrent.CompletableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,6 +10,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 @Service
+@Timed(value = "payment.service.execution", histogram = true)
 public class FraudCheckService {
 
     private static final Logger log = LoggerFactory.getLogger(FraudCheckService.class);
@@ -15,9 +18,10 @@ public class FraudCheckService {
     @Async("transactionProcessingExecutor")
     public CompletableFuture<Boolean> checkFraud(Transaction transaction) {
         String threadName = Thread.currentThread().getName();
-        log.info(
-                "Starting fraud check for account {} on thread {}",
-                transaction.getAccountNumber(),
+        String maskedAccountNumber = SensitiveDataMasker.maskAccountNumber(transaction.getAccountNumber());
+        log.debug(
+                "Starting fraud check account={} thread={}",
+                maskedAccountNumber,
                 threadName
         );
 
@@ -26,9 +30,9 @@ public class FraudCheckService {
         boolean isFraudulent = transaction.getAmount().doubleValue() >= 10000
                 || transaction.getAccountNumber().endsWith("999");
 
-        log.info(
-                "Completed fraud check for account {} with result {} on thread {}",
-                transaction.getAccountNumber(),
+        log.debug(
+                "Completed fraud check account={} result={} thread={}",
+                maskedAccountNumber,
                 isFraudulent,
                 threadName
         );

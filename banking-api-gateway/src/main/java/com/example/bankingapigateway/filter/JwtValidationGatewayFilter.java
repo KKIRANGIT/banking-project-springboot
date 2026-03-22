@@ -5,6 +5,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
@@ -13,15 +16,16 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
-import org.springframework.cloud.gateway.filter.GatewayFilterChain;
-import org.springframework.cloud.gateway.filter.GlobalFilter;
 import reactor.core.publisher.Mono;
 
 @Component
 public class JwtValidationGatewayFilter implements GlobalFilter, Ordered {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JwtValidationGatewayFilter.class);
+    private static final String MDC_KEY = "correlationId";
     private static final Set<String> PUBLIC_PATHS = Set.of(
+            "/api/auth/register",
+            "/api/auth/login",
             "/api/payments/auth/register",
             "/api/payments/auth/login"
     );
@@ -60,7 +64,15 @@ public class JwtValidationGatewayFilter implements GlobalFilter, Ordered {
     }
 
     private Mono<Void> unauthorized(ServerWebExchange exchange, String message) {
-        LOGGER.warn("Gateway JWT validation failed: {} path={}", message, exchange.getRequest().getPath());
+        String correlationId = exchange.getRequest().getHeaders().getFirst(CorrelationIdGatewayFilter.CORRELATION_ID_HEADER);
+        if (correlationId != null && !correlationId.isBlank()) {
+            MDC.put(MDC_KEY, correlationId);
+        }
+        try {
+            LOGGER.warn("Gateway JWT validation failed message={} path={}", message, exchange.getRequest().getPath());
+        } finally {
+            MDC.remove(MDC_KEY);
+        }
         exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
         exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
         DataBuffer body = exchange.getResponse().bufferFactory().wrap(

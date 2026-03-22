@@ -1,0 +1,33 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: banking-payment-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - payment-service:8081
+
+  - job_name: banking-account-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - account-service:8082
+
+  - job_name: banking-api-gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - api-gateway:8080
+
+  - job_name: banking-eureka-server
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - eureka-server:8761
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - prometheus:9090

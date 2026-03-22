@@ -3,11 +3,13 @@ package com.example.bankingpaymentservice.service;
 import com.example.bankingpaymentservice.dto.AccountResponse;
 import com.example.bankingpaymentservice.model.Account;
 import com.example.bankingpaymentservice.repository.AccountRepository;
+import io.micrometer.core.annotation.Timed;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@Timed(value = "payment.service.execution", histogram = true)
 @Transactional(readOnly = true)
 public class AccountService {
 

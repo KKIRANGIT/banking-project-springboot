@@ -4,6 +4,8 @@ import com.example.bankingpaymentservice.config.KafkaConfig;
 import com.example.bankingpaymentservice.kafka.TransactionEvent;
 import com.example.bankingpaymentservice.kafka.TransactionEventType;
 import com.example.bankingpaymentservice.model.Transaction;
+import com.example.bankingpaymentservice.util.SensitiveDataMasker;
+import io.micrometer.core.annotation.Timed;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import org.slf4j.Logger;
@@ -12,6 +14,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
+@Timed(value = "payment.service.execution", histogram = true)
 public class TransactionEventProducer {
 
     private static final Logger log = LoggerFactory.getLogger(TransactionEventProducer.class);
@@ -44,12 +47,13 @@ public class TransactionEventProducer {
 
     private void publish(String topic, TransactionEvent event) {
         kafkaTemplate.send(topic, event.getAccountNumber(), event);
+        String maskedAccountNumber = SensitiveDataMasker.maskAccountNumber(event.getAccountNumber());
         log.info(
-                "Published event {} for account {} to topic {} with partition key {}",
+                "Published eventType={} account={} topic={} partitionKey={}",
                 event.getEventType(),
-                event.getAccountNumber(),
+                maskedAccountNumber,
                 topic,
-                event.getAccountNumber()
+                maskedAccountNumber
         );
     }
 

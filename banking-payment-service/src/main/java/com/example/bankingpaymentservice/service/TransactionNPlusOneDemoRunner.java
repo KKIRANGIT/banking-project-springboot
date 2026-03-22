@@ -1,5 +1,6 @@
 package com.example.bankingpaymentservice.service;
 
+import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -8,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 @Profile("dev")
+@Timed(value = "payment.component.execution", histogram = true)
 public class TransactionNPlusOneDemoRunner implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(TransactionNPlusOneDemoRunner.class);

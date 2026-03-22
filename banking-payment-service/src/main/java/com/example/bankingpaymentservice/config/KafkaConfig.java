@@ -1,7 +1,9 @@
 package com.example.bankingpaymentservice.config;
 
 import com.example.bankingpaymentservice.kafka.TransactionEvent;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.TopicPartition;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -11,7 +13,6 @@ import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.FixedBackOff;
-import org.apache.kafka.clients.admin.NewTopic;
 
 @Configuration
 public class KafkaConfig {
@@ -50,11 +51,13 @@ public class KafkaConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, TransactionEvent> auditKafkaListenerContainerFactory(
             ConsumerFactory<String, TransactionEvent> consumerFactory,
-            KafkaOperations<String, TransactionEvent> kafkaOperations
+            KafkaOperations<String, TransactionEvent> kafkaOperations,
+            @Value("${spring.kafka.listener.auto-startup:true}") boolean autoStartup
     ) {
         ConcurrentKafkaListenerContainerFactory<String, TransactionEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
+        factory.setAutoStartup(autoStartup);
 
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
                 kafkaOperations,

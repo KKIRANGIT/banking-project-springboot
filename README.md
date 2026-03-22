@@ -1,90 +1,72 @@
 # Banking Project Spring Boot
 
-Professional reference documentation for the banking microservices platform in this repository.
+Professional reference documentation for the Phase 9 Dockerized banking microservices platform in this repository.
 
 ## Overview
 
-This repository now contains four Spring Boot applications and one shared infrastructure stack:
+This repository contains four Spring Boot services and one shared Docker Compose stack:
 
-- `banking-api-gateway`
-  - Public entry point on `8080`
-  - Validates JWTs before forwarding protected requests
-  - Applies per-IP rate limiting
-  - Propagates correlation IDs
 - `banking-eureka-server`
-  - Service registry on `8761`
-  - Tracks the gateway, payment service, and account service
+  - Service registry
+  - Port `8761`
+- `banking-api-gateway`
+  - Public entry point
+  - Port `8080`
+  - JWT validation, rate limiting, correlation ID propagation
 - `banking-payment-service`
-  - Internal service on `8081`
-  - Handles user registration, login, and transaction processing
-  - Uses MySQL, Redis, Kafka, OpenFeign, Resilience4j, and Eureka discovery
+  - Transaction and authentication service
+  - Internal port `8081`
+  - Uses MySQL, Redis, Kafka, Feign, Resilience4j, Eureka
 - `banking-account-service`
-  - Internal service on `8082`
-  - Handles account lookup, creation, and balance updates
-  - Uses its own MySQL schema, JWT validation, and Eureka discovery
+  - Account lookup and balance service
+  - Internal port `8082`
+  - Uses MySQL, JWT validation, Eureka
 
-Use the root [`docker-compose.yml`](./docker-compose.yml) as the single source of truth for local runtime.
+All services are Dockerized and started from the single root [`docker-compose.yml`](./docker-compose.yml).
 
-## Architecture
+## Docker Runtime
 
-### Request Flow
+### Base Image
 
-1. Client calls the API gateway on `http://localhost:8080`.
-2. Gateway creates or forwards `X-Correlation-ID`.
-3. Gateway validates JWTs for protected `/api/**` routes.
-4. Gateway rate-limits requests to `10` requests per second per IP.
-5. Gateway routes requests by service name through Eureka:
-   - `/api/payments/**` -> `banking-payment-service`
-   - `/api/accounts/**` -> `banking-account-service`
-6. Payment service calls account service through Feign using Eureka service discovery.
-7. Account service validates account state and balance.
+Each service Dockerfile uses:
 
-### Service Responsibilities
+```text
+amazoncorretto:17
+```
 
-#### API Gateway
+### JVM Settings
 
-- Route incoming requests to downstream services
-- Reject invalid or expired JWTs with `401`
-- Reject bursts above `10` requests per second per IP with `429`
-- Add `X-Correlation-ID` to forwarded requests and responses
+Each service container runs with:
 
-#### Eureka Server
+```text
+-Xms256m -Xmx512m
+```
 
-- Registry for all discoverable services
-- Dashboard available at `http://localhost:8761`
-- Self-registration disabled
+### Service Healthchecks
 
-#### Payment Service
+Each application container includes a Docker `HEALTHCHECK` instruction:
 
-- Register and authenticate users
-- Issue JWT tokens
-- Create, list, fetch, and delete transactions
-- Publish Kafka transaction and audit events
-- Validate account state and funds through Feign
-- Protect downstream account access with Resilience4j retry and circuit breaker
+- Eureka: `http://localhost:8761/actuator/health`
+- Gateway: `http://localhost:8080/actuator/health`
+- Payment: `http://localhost:8081/actuator/health`
+- Account: `http://localhost:8082/actuator/health`
 
-#### Account Service
+Compose also waits on health where it matters:
 
-- Create accounts
-- Fetch account details by account number
-- Update balances
-- Validate JWTs using the shared secret
+- `mysql` must be healthy before payment and account start
+- `kafka` must be healthy before payment starts
+- `eureka-server` must be healthy before gateway, payment, and account start
 
 ## Project Structure
 
 ```text
 banking-project-springboot/
-|-- banking-api-gateway/
-|   |-- src/main/java/
-|   |-- src/main/resources/
-|   |-- Dockerfile
-|   `-- pom.xml
 |-- banking-eureka-server/
 |   |-- src/main/java/
 |   |-- src/main/resources/
 |   |-- Dockerfile
 |   `-- pom.xml
-|-- banking-account-service/
+|-- banking-api-gateway/
 |   |-- src/main/java/
 |   |-- src/main/resources/
 |   |-- Dockerfile
@@ -94,10 +76,16 @@ banking-project-springboot/
 |   |-- src/main/resources/
 |   |-- Dockerfile
 |   `-- pom.xml
+|-- banking-account-service/
+|   |-- src/main/java/
+|   |-- src/main/resources/
+|   |-- Dockerfile
+|   `-- pom.xml
 |-- infra/
 |   `-- mysql-init/
 |       `-- 01-create-databases.sql
 |-- docker-compose.yml
+|-- .env
 |-- .gitignore
 `-- README.md
 ```
@@ -107,9 +95,9 @@ banking-project-springboot/
 - Java 17
 - Spring Boot 3.4.4
 - Spring Cloud 2024.0.1
-- Spring Security with JWT
-- Spring Cloud Gateway
 - Netflix Eureka
+- Spring Cloud Gateway
+- Spring Security with JWT
 - OpenFeign
 - Resilience4j
 - Spring Data JPA
@@ -121,104 +109,161 @@ banking-project-springboot/
 
 ## Runtime Ports
 
-Public endpoints:
+Public:
 
-- API gateway: `8080`
-- Eureka dashboard: `8761`
-
-Internal service ports inside Docker network:
-
-- Payment service: `8081`
-- Account service: `8082`
-
-Infrastructure:
-
+- API Gateway: `8080`
+- Eureka Dashboard: `8761`
 - MySQL: `3306`
 - Redis: `6379`
-- Kafka external listener: `9092`
-- Kafka internal listener: `29092`
+- Kafka: `9092`
 - ZooKeeper: `2181`
+
+Internal Docker network:
+
+- Payment Service: `8081`
+- Account Service: `8082`
+- Kafka internal listener: `29092`
 
 ## Databases
 
-MySQL initializes two schemas from [`infra/mysql-init/01-create-databases.sql`](./infra/mysql-init/01-create-databases.sql):
+The MySQL init script creates two schemas:
 
-- `banking_payment_service_dev`
+- `banking_payments_db`
 - `banking_accounts_db`
 
-## Security Model
+Source file:
 
-### JWT
+- [`infra/mysql-init/01-create-databases.sql`](./infra/mysql-init/01-create-databases.sql)
 
-- JWTs are issued by `banking-payment-service`
-- `banking-account-service` validates the same JWT secret
-- `banking-api-gateway` validates JWT signature and expiry before forwarding protected requests
-- Shared secret property:
-  - `security.jwt.secret`
-  - environment override: `JWT_SECRET`
+## Environment Variables
 
-### Gateway Protection Rules
+All runtime variables are defined in the root `.env` file.
 
-- Public:
-  - `POST /api/payments/auth/register`
-  - `POST /api/payments/auth/login`
-- Protected:
-  - all other `/api/**` routes require `Authorization: Bearer <token>`
-- Invalid or expired token response:
-  - `401 Unauthorized`
-- Rate limit:
-  - `10` requests per second per IP
-  - excess requests return `429 Too Many Requests`
+Key variables:
 
-### Service Roles
+- `MYSQL_ROOT_PASSWORD`
+- `DB_PASSWORD`
+- `JWT_SECRET`
+- `PAYMENT_DB_NAME`
+- `ACCOUNT_DB_NAME`
+- `EUREKA_SERVER_URL`
+- `KAFKA_BOOTSTRAP_SERVERS`
+- `GATEWAY_PORT`
 
-#### Payment Service
+The compose file reads these variables and injects them into the containers.
 
-- `POST /api/auth/**` -> public
-- `GET /api/transactions/**` -> `CUSTOMER`, `TELLER`, `ADMIN`
-- `POST /api/transactions/**` -> `TELLER`, `ADMIN`
-- `DELETE /api/transactions/**` -> `ADMIN`
-- `/actuator/**` -> `ADMIN`
+## Docker Compose Services
 
-#### Account Service
+The root compose file starts:
 
-- `GET /api/accounts/**` -> `CUSTOMER`, `TELLER`, `ADMIN`
-- `POST /api/accounts/**` -> `TELLER`, `ADMIN`
-- `PUT /api/accounts/**` -> `TELLER`, `ADMIN`
-- `/actuator/health` and `/actuator/info` -> public
+- `mysql`
+- `redis`
+- `zookeeper`
+- `kafka`
+- `eureka-server`
+- `api-gateway`
+- `payment-service`
+- `account-service`
+
+### Persistence
+
+The Compose stack persists MySQL data using:
+
+- `mysql-data`
+
+## Security and Routing
+
+### Gateway Routes
+
+- `/api/payments/**` -> `banking-payment-service`
+- `/api/accounts/**` -> `banking-account-service`
+
+### JWT Behavior
+
+Public gateway endpoints:
+
+- `POST /api/payments/auth/register`
+- `POST /api/payments/auth/login`
+
+Protected:
+
+- all other `/api/**` routes require `Authorization: Bearer <token>`
+
+Invalid or expired token:
+
+- gateway returns `401`
+
+### Rate Limit
+
+- max `10` requests per second per IP
+- excess requests return `429`
+
+### Correlation ID
+
+- gateway forwards incoming `X-Correlation-ID`
+- if absent, gateway generates a UUID
+- gateway adds `X-Correlation-ID` to forwarded requests and responses
+- payment and account services log the correlation ID
 
 ## Service Discovery
 
-### Eureka Registration
+Registered in Eureka:
 
-The following services register with Eureka on startup:
-
+- `BANKING-EUREKA-SERVER` is the registry itself and exposed at `http://localhost:8761`
 - `BANKING-API-GATEWAY`
 - `BANKING-PAYMENT-SERVICE`
 - `BANKING-ACCOUNT-SERVICE`
 
-Dashboard:
+Feign in payment service resolves account service by service name through Eureka.
 
-```text
-http://localhost:8761
+## Build and Run
+
+### Build JARs
+
+From the repository root:
+
+```powershell
+mvn -q -DskipTests -f banking-eureka-server\pom.xml package
+mvn -q -DskipTests -f banking-api-gateway\pom.xml package
+mvn -q -DskipTests -f banking-account-service\pom.xml package
+mvn -q -DskipTests -f banking-payment-service\pom.xml package
 ```
 
-### Feign Discovery
+### Start the Full Stack
 
-`banking-payment-service` resolves `banking-account-service` by service name through Eureka. There is no hardcoded account-service URL in the payment application config anymore.
+```powershell
+docker compose up -d --build
+```
+
+### Check Container Health
+
+```powershell
+docker compose ps -a
+```
+
+### Stop the Stack
+
+```powershell
+docker compose down
+```
+
+### Stop and Remove MySQL Volume
+
+```powershell
+docker compose down -v
+```
 
 ## API Summary
 
 All client traffic should go through the gateway.
 
-### Authentication
+### Register
 
-Base URL: `http://localhost:8080`
+```text
+POST http://localhost:8080/api/payments/auth/register
+```
 
-- `POST /api/payments/auth/register`
-- `POST /api/payments/auth/login`
-
-Example register payload:
+Example payload:
 
 ```json
 {
@@ -228,7 +273,13 @@ Example register payload:
 }
 ```
 
-Example login payload:
+### Login
+
+```text
+POST http://localhost:8080/api/payments/auth/login
+```
+
+Example payload:
 
 ```json
 {
@@ -237,44 +288,19 @@ Example login payload:
 }
 ```
 
-### Accounts
+### Get Account
 
-Base URL: `http://localhost:8080`
-
-- `GET /api/accounts/{accountNumber}`
-- `POST /api/accounts`
-- `PUT /api/accounts/{accountNumber}/balance`
-
-Example create account payload:
-
-```json
-{
-  "accountNumber": "ACC2001",
-  "accountHolderName": "John Smith",
-  "balance": 2500.00,
-  "status": "ACTIVE"
-}
+```text
+GET http://localhost:8080/api/accounts/ACC1001
 ```
 
-Example balance update payload:
+### Create Transaction
 
-```json
-{
-  "amount": -100.00
-}
+```text
+POST http://localhost:8080/api/payments/transactions
 ```
 
-### Payments and Transactions
-
-Base URL: `http://localhost:8080`
-
-- `POST /api/payments/transactions`
-- `GET /api/payments/transactions`
-- `GET /api/payments/transactions/{id}`
-- `GET /api/payments/transactions/account/{accountNumber}`
-- `DELETE /api/payments/transactions/{id}`
-
-Example transaction payload:
+Example payload:
 
 ```json
 {
@@ -284,7 +310,7 @@ Example transaction payload:
 }
 ```
 
-Recommended request headers:
+Recommended headers:
 
 ```text
 Authorization: Bearer <jwt>
@@ -292,107 +318,9 @@ Idempotency-Key: <valid UUID>
 X-Correlation-ID: <optional client value>
 ```
 
-## Feign and Resilience
-
-The payment service calls the account service through `AccountServiceClient` using the service name `banking-account-service`.
-
-### Account Validation Before Transaction Processing
-
-Before processing a transaction, the payment service:
-
-1. Fetches the account through Feign
-2. Verifies the account exists
-3. Verifies the account is active
-4. Verifies sufficient funds for debits
-
-Failure behavior:
-
-- missing account -> business exception
-- insufficient balance -> `InsufficientFundsException`
-- unavailable account service -> fallback account with `status = UNKNOWN`, then `503`
-
-### Retry
-
-- Retry name: `accountService`
-- Total attempts: `3`
-  - initial call + `2` retries
-- Wait duration: `1s`
-
-### Circuit Breaker
-
-- Circuit breaker name: `accountService`
-- Opens after `3` recorded failures
-- Open-state wait duration: `5s`
-- Half-open permitted calls: `2`
-- Automatic transition to half-open: enabled
-
-### Logged State Changes
-
-Payment service logs circuit transitions:
-
-- `CLOSED -> OPEN`
-- `OPEN -> HALF_OPEN`
-- `HALF_OPEN -> CLOSED`
-
-## Correlation IDs
-
-### Gateway Behavior
-
-- Uses incoming `X-Correlation-ID` if present
-- Generates a UUID if not present
-- Adds `X-Correlation-ID` to forwarded requests
-- Adds `X-Correlation-ID` to responses
-
-### Downstream Logging
-
-Both payment and account services log incoming requests with the correlation ID in the log pattern and request log entry.
-
-## Quick Start
-
-### Prerequisites
-
-- Java 17
-- Maven 3.9+
-- Docker Desktop or Docker Engine with Compose support
-
-### Run with Docker Compose
-
-From the repository root:
-
-```powershell
-docker compose up -d --build
-```
-
-Check runtime state:
-
-```powershell
-docker compose ps -a
-```
-
-Stop everything:
-
-```powershell
-docker compose down
-```
-
-Remove containers and volumes:
-
-```powershell
-docker compose down -v
-```
-
-### Build Services Locally
-
-```powershell
-mvn -q -DskipTests -f banking-eureka-server\pom.xml package
-mvn -q -DskipTests -f banking-api-gateway\pom.xml package
-mvn -q -DskipTests -f banking-account-service\pom.xml package
-mvn -q -DskipTests -f banking-payment-service\pom.xml package
-```
-
 ## Functional Validation Guide
 
-### 1. Start the platform
+### 1. Start the stack
 
 ```powershell
 docker compose up -d --build
@@ -410,9 +338,7 @@ Expected result:
 - `BANKING-PAYMENT-SERVICE` -> `UP`
 - `BANKING-ACCOUNT-SERVICE` -> `UP`
 
-### 3. Register and log in through the gateway
-
-Register:
+### 3. Register a user
 
 ```powershell
 $register = @{
@@ -428,7 +354,7 @@ Invoke-RestMethod `
   -Body $register
 ```
 
-Login:
+### 4. Login and get JWT
 
 ```powershell
 $login = @{
@@ -445,18 +371,7 @@ $auth = Invoke-RestMethod `
 $token = $auth.token
 ```
 
-### 4. Normal gateway flow
-
-Get an account through the gateway:
-
-```powershell
-Invoke-RestMethod `
-  -Method Get `
-  -Uri "http://localhost:8080/api/accounts/ACC1001" `
-  -Headers @{ Authorization = "Bearer $token" }
-```
-
-Create a transaction through the gateway:
+### 5. Create transaction through gateway
 
 ```powershell
 $tx = @{
@@ -469,61 +384,41 @@ Invoke-RestMethod `
   -Method Post `
   -Uri "http://localhost:8080/api/payments/transactions" `
   -Headers @{
-    Authorization   = "Bearer $token"
+    Authorization      = "Bearer $token"
     "Idempotency-Key" = "77777777-7777-7777-7777-777777777777"
-    "X-Correlation-ID" = "corr-demo-001"
+    "X-Correlation-ID" = "phase9-demo-001"
   } `
   -ContentType "application/json" `
   -Body $tx
 ```
 
-Expected result:
+### 6. Verify Kafka event flow
 
-- gateway returns `201`
-- payment service resolves account service through Eureka
-- account balance changes according to transaction type
-- logs in gateway, payment, and account services show the same correlation ID
-
-### 5. Invalid JWT rejection
+Check payment-service logs:
 
 ```powershell
-curl.exe -i -H "Authorization: Bearer invalid-token" http://localhost:8080/api/accounts/ACC1001
+docker compose logs payment-service --tail=200
+```
+
+Look for:
+
+- `Published event INITIATED ... payment.transaction.initiated`
+- `Published event INITIATED ... payment.audit.events`
+- `Published event COMPLETED ... payment.transaction.completed`
+- `Published event COMPLETED ... payment.audit.events`
+
+### 7. Verify audit log persistence
+
+```powershell
+docker compose exec -T mysql mysql -uroot -p<MYSQL_ROOT_PASSWORD> -D banking_payments_db -e "SELECT id, transaction_id, account_number, event_type, topic_name FROM audit_logs ORDER BY id DESC LIMIT 5;"
 ```
 
 Expected result:
 
-- gateway returns `401`
-- request does not reach the account service
+- rows exist in `audit_logs`
+- both `INITIATED` and `COMPLETED` events are persisted
 
-### 6. Rate limit verification
-
-A real burst test must hit a routed API path, not the gateway actuator endpoint.
-
-Example PowerShell burst:
-
-```powershell
-Add-Type -AssemblyName System.Net.Http
-
-$login = '{"username":"teller1","password":"Password123"}'
-$loginClient = New-Object System.Net.Http.HttpClient
-$loginContent = New-Object System.Net.Http.StringContent($login, [System.Text.Encoding]::UTF8, 'application/json')
-$loginResponse = $loginClient.PostAsync('http://localhost:8080/api/payments/auth/login', $loginContent).Result
-$token = ($loginResponse.Content.ReadAsStringAsync().Result | ConvertFrom-Json).token
-
-$client = New-Object System.Net.Http.HttpClient
-$client.DefaultRequestHeaders.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer', $token)
-$tasks = for ($i = 0; $i -lt 12; $i++) { $client.GetAsync('http://localhost:8080/api/accounts/ACC1001') }
-[System.Threading.Tasks.Task]::WaitAll($tasks)
-$tasks | ForEach-Object { [int]$_.Result.StatusCode }
-```
-
-Expected result:
-
-- at most `10` requests return `200`
-- excess requests return `429`
-- gateway logs `Rate limit exceeded for ip=...`
-
-### 7. Account service down and circuit breaker behavior
+### 8. Verify circuit breaker
 
 Stop account service:
 
@@ -531,24 +426,13 @@ Stop account service:
 docker compose stop account-service
 ```
 
-Send multiple transaction requests through the gateway. Expected behavior:
+Send multiple gateway transaction requests.
 
-- first request is delayed because retries run
-- later requests fail quickly once the breaker is open
-- payment service responds with `503`
+Expected result:
 
-Check logs:
-
-```powershell
-docker compose logs payment-service --since 2m
-```
-
-Look for:
-
-- fallback log entries
-- `Circuit breaker accountService state changed from CLOSED to OPEN`
-
-### 8. Account service recovery
+- first request retries and then returns `503`
+- later requests return `503` quickly after the breaker opens
+- payment logs show `CLOSED -> OPEN`
 
 Restart account service:
 
@@ -556,72 +440,59 @@ Restart account service:
 docker compose start account-service
 ```
 
-Wait slightly more than `5` seconds, then send another transaction through the gateway.
+Wait for health and send another transaction.
 
-Expected behavior:
+Expected result:
 
-- breaker moves `OPEN -> HALF_OPEN`
-- successful downstream call closes the breaker
-- transaction succeeds again
-
-Check logs:
-
-```powershell
-docker compose logs payment-service --since 2m
-```
-
-Look for:
-
-- `OPEN -> HALF_OPEN`
-- `HALF_OPEN -> CLOSED`
+- payment logs show `OPEN -> HALF_OPEN`
+- recovery transaction succeeds
+- payment logs show `HALF_OPEN -> CLOSED`
 
 ## Verified Local Result
 
 Verified in Docker on `March 22, 2026`:
 
-- gateway health endpoint returned `200`
-- Eureka dashboard at `http://localhost:8761` showed all three runtime clients as `UP`
-- gateway login succeeded and returned a JWT
-- `GET /api/accounts/ACC1001` through the gateway returned `200`
-- `POST /api/payments/transactions` through the gateway returned `201`
-- invalid JWT on a protected gateway route returned `401`
-- a 12-request concurrent burst against `/api/accounts/ACC1001` returned both `200` and `429`
-- gateway, payment, and account logs all carried the same correlation IDs during routed requests
+- all containers reached healthy state through `docker compose`
+- all four service Dockerfiles built on `amazoncorretto:17`
+- Eureka dashboard showed payment, account, and gateway as `UP`
+- user registration and login worked through the gateway
+- transaction creation through the gateway returned `SUCCESS`
+- payment logs showed Kafka event publication for `INITIATED` and `COMPLETED`
+- payment logs showed `Audit event consumed for account ACC1001 on topic payment.audit.events`
+- MySQL query returned audit rows in `banking_payments_db.audit_logs`
+- stopping account-service produced `503` responses and opened the circuit breaker
+- after account-service restart, the breaker moved `OPEN -> HALF_OPEN -> CLOSED`
 
 ## Operational Notes
 
-- Use only the root Compose file
-- Client traffic should go through the gateway, not directly to internal services
-- Payment and account services are exposed only inside the Docker network in the Compose setup
-- Both business services run with `prod` profile in Docker
-- Local development defaults to `dev`
-- MySQL 8.4 may produce a Flyway compatibility warning, but startup completes
-- Kafka and ZooKeeper are part of the existing payment-service infrastructure requirements
-- If Kafka fails after an unclean restart with a stale ZooKeeper broker registration, restart `zookeeper` first and then start `kafka`
+- use only the root Compose file
+- client traffic should go through the gateway
+- payment and account services are internal-only in Compose
+- `.env` is the source of runtime environment values for local Docker runs
+- if Kafka fails after an unclean restart, restart `zookeeper` first and then start `kafka`
+- `docker compose down -v` is the clean reset path when you need MySQL to re-run schema initialization
 
 ## Maintenance Standard
 
 Keep this README current whenever the project changes.
 
-Update this document when any of the following change:
+Update this document whenever these change:
 
 - service names
 - ports
+- Docker images
 - environment variables
-- Docker workflow
-- database names
-- JWT and auth behavior
+- healthchecks
 - route mappings
-- gateway filters
-- resilience settings
-- test instructions
-- service discovery behavior
+- JWT or gateway behavior
+- database names
+- Compose startup dependencies
+- verification commands
 
-When updating in future, keep the document professional:
+When updating in future, keep it professional:
 
-- describe the actual current behavior, not planned behavior
-- prefer repository-root commands unless there is a clear reason not to
-- keep one source of truth for infrastructure instructions
-- include request examples for any externally used endpoint
-- record important operational caveats and recovery steps
-- update the verification section when behavior or topology changes
+- document actual current behavior
+- prefer repository-root commands
+- keep one source of truth for Docker runtime instructions
+- include real request examples for externally used endpoints
+- record operational caveats and recovery steps

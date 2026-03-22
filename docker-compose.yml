@@ -3,15 +3,15 @@ services:
     image: mysql:8.4
     container_name: banking-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: banking_payment_service_dev
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${PAYMENT_DB_NAME}
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
       - ./infra/mysql-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -20,9 +20,7 @@ services:
     image: redis:7.2
     container_name: banking-redis
     ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
+      - "${REDIS_PORT}:6379"
     command: ["redis-server", "--appendonly", "yes"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -37,10 +35,7 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - "2181:2181"
-    volumes:
-      - zookeeper-data:/var/lib/zookeeper/data
-      - zookeeper-log:/var/lib/zookeeper/log
+      - "${ZOOKEEPER_PORT}:2181"
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
@@ -49,19 +44,17 @@ services:
       zookeeper:
         condition: service_started
     ports:
-      - "9092:9092"
-      - "29092:29092"
+      - "${KAFKA_PORT}:9092"
+      - "${KAFKA_INTERNAL_PORT}:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:${KAFKA_PORT}
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
-    volumes:
-      - kafka-data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list > /dev/null 2>&1"]
       interval: 15s
@@ -72,8 +65,16 @@ services:
     build:
       context: ./banking-eureka-server
     container_name: banking-eureka-server
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE}
     ports:
-      - "8761:8761"
+      - "${EUREKA_SERVER_PORT}:8761"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8761/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   account-service:
     build:
@@ -83,18 +84,24 @@ services:
       mysql:
         condition: service_healthy
       eureka-server:
-        condition: service_started
+        condition: service_healthy
     environment:
-      SPRING_PROFILES_ACTIVE: prod
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_NAME: banking_accounts_db
-      DB_USERNAME: root
-      DB_PASSWORD: root
-      JWT_SECRET: banking-payment-service-jwt-secret-key-change-me-1234567890
-      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${ACCOUNT_DB_NAME}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
     expose:
-      - "8082"
+      - "${ACCOUNT_SERVICE_PORT}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8082/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   payment-service:
     build:
@@ -103,28 +110,34 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      redis:
-        condition: service_healthy
       kafka:
         condition: service_healthy
       eureka-server:
-        condition: service_started
+        condition: service_healthy
       account-service:
-        condition: service_started
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      SPRING_PROFILES_ACTIVE: prod
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_NAME: banking_payment_service_dev
-      DB_USERNAME: root
-      DB_PASSWORD: root
-      JWT_SECRET: banking-payment-service-jwt-secret-key-change-me-1234567890
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${PAYMENT_DB_NAME}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
     expose:
-      - "8081"
+      - "${PAYMENT_SERVICE_PORT}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   api-gateway:
     build:
@@ -132,20 +145,23 @@ services:
     container_name: banking-api-gateway
     depends_on:
       eureka-server:
-        condition: service_started
-      account-service:
-        condition: service_started
+        condition: service_healthy
       payment-service:
-        condition: service_started
+        condition: service_healthy
+      account-service:
+        condition: service_healthy
     environment:
-      JWT_SECRET: banking-payment-service-jwt-secret-key-change-me-1234567890
-      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE}
+      JWT_SECRET: ${JWT_SECRET}
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
     ports:
-      - "8080:8080"
+      - "${GATEWAY_PORT}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   mysql-data:
-  redis-data:
-  zookeeper-data:
-  zookeeper-log:
-  kafka-data:

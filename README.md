@@ -1,72 +1,406 @@
 # Banking Project Spring Boot
 
-Professional reference documentation for the Phase 9 Dockerized banking microservices platform in this repository.
+Production-style banking microservices platform built with Spring Boot, Spring Cloud, React, Tailwind CSS, Kafka, MySQL, Redis, Prometheus, and Grafana.
+
+This repository contains a complete end-to-end sample system with:
+
+- service discovery through Eureka
+- gateway routing, JWT validation, correlation IDs, and rate limiting
+- account and payment microservices
+- Kafka-based event publishing and audit logging
+- resilience patterns with retry and circuit breaker
+- observability with Micrometer, Prometheus, and Grafana
+- Dockerized runtime for the full stack
+- React frontend for operator workflows
+
+## Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Services](#services)
+- [Frontend](#frontend)
+- [Tech Stack](#tech-stack)
+- [Tools And Libraries](#tools-and-libraries)
+- [Security](#security)
+- [Messaging And Data Flow](#messaging-and-data-flow)
+- [Observability](#observability)
+- [Testing And Quality](#testing-and-quality)
+- [Project Structure](#project-structure)
+- [Ports](#ports)
+- [Environment Variables](#environment-variables)
+- [Quick Start](#quick-start)
+- [Frontend Usage Guide](#frontend-usage-guide)
+- [API Guide](#api-guide)
+- [Operations](#operations)
+- [Troubleshooting](#troubleshooting)
+- [Maintenance Notes](#maintenance-notes)
 
 ## Overview
 
-This repository contains four Spring Boot services and one shared Docker Compose stack:
+The platform models a simple banking workflow:
 
-- `banking-eureka-server`
-  - Service registry
-  - Port `8761`
-- `banking-api-gateway`
-  - Public entry point
-  - Port `8080`
-  - JWT validation, rate limiting, correlation ID propagation
-- `banking-payment-service`
-  - Transaction and authentication service
-  - Internal port `8081`
-  - Uses MySQL, Redis, Kafka, Feign, Resilience4j, Eureka
-- `banking-account-service`
-  - Account lookup and balance service
-  - Internal port `8082`
-  - Uses MySQL, JWT validation, Eureka
-- `banking-frontend`
-  - React + Tailwind operator dashboard
-  - Public port `5173`
-  - Uses the API gateway as its backend entry point
+- users register and log in through the payment service
+- all external traffic goes through the API gateway
+- accounts are managed by `banking-account-service`
+- transactions are handled by `banking-payment-service`
+- transaction events are published to Kafka
+- audit events are consumed and persisted
+- service discovery is handled by Eureka
+- dashboards and metrics are available through Prometheus and Grafana
 
-All services are Dockerized and started from the single root [`docker-compose.yml`](./docker-compose.yml).
+The frontend is a lightweight operator dashboard for:
 
-## Docker Runtime
+- user registration
+- login
+- account creation
+- account lookup
+- transaction creation
+- recent transaction viewing
+- gateway health visibility
 
-### Base Image
-
-Each service Dockerfile uses:
+## Architecture
 
 ```text
-amazoncorretto:17
+Browser
+  |
+  v
+banking-frontend (Nginx + React)
+  |
+  v
+banking-api-gateway
+  |
+  +--> banking-payment-service ----> MySQL (banking_payments_db)
+  |           |                     Redis
+  |           |
+  |           +--> Kafka topics --> audit and notification consumers
+  |           |
+  |           +--> Feign + Eureka --> banking-account-service
+  |
+  +--> banking-account-service ----> MySQL (banking_accounts_db)
+  |
+  v
+banking-eureka-server
+
+Prometheus <--- metrics from gateway, payment, account, eureka
+Grafana    <--- dashboards from Prometheus
 ```
 
-### JVM Settings
+## Services
 
-Each service container runs with:
+### `banking-frontend`
+
+- React + Tailwind CSS frontend
+- served by Nginx in Docker
+- public entry point for browser users
+- proxies `/api/**` and `/actuator/**` to the API gateway
+
+### `banking-api-gateway`
+
+- external API entry point
+- routes requests to backend services
+- validates JWTs before forwarding protected requests
+- enforces rate limiting per IP
+- creates or propagates correlation IDs
+
+### `banking-eureka-server`
+
+- service registry for internal service discovery
+- used by gateway and Feign clients
+
+### `banking-payment-service`
+
+- authentication and transaction service
+- user registration and login
+- transaction creation and lookup
+- Kafka event publishing
+- audit event consumption
+- Redis-backed support components
+- Feign client integration with account service
+- Resilience4j retry and circuit breaker
+
+### `banking-account-service`
+
+- account creation and lookup
+- balance updates
+- independent MySQL schema
+- JWT validation using the shared secret
+
+### Infrastructure Services
+
+- `mysql`
+- `redis`
+- `zookeeper`
+- `kafka`
+- `prometheus`
+- `grafana`
+
+## Frontend
+
+The frontend is part of the platform and now runs through Docker with the rest of the stack.
+
+Main URL:
 
 ```text
--Xms256m -Xmx512m
+http://localhost:5173
 ```
 
-### Service Healthchecks
+Main frontend capabilities:
 
-Each application container includes a Docker `HEALTHCHECK` instruction:
+- register a user
+- log in and store the JWT in browser local storage
+- create an account
+- load an account by account number
+- create debit and credit transactions
+- show recent transactions for the selected account
+- show gateway health status
 
-- Eureka: `http://localhost:8761/actuator/health`
-- Gateway: `http://localhost:8080/actuator/health`
-- Payment: `http://localhost:8081/actuator/health`
-- Account: `http://localhost:8082/actuator/health`
-- Frontend: `http://localhost/`
+UI sections:
 
-Compose also waits on health where it matters:
+- `Authentication desk`
+- `Lookup and inspect`
+- `Create a fresh account`
+- `Post a transaction`
+- `Recent transactions`
+- `Gateway health snapshot`
 
-- `mysql` must be healthy before payment and account start
-- `kafka` must be healthy before payment starts
-- `eureka-server` must be healthy before gateway, payment, and account start
+## Tech Stack
+
+### Backend
+
+- Java 17
+- Spring Boot 3
+- Spring Cloud
+- Spring Security
+- Spring Data JPA
+- Flyway
+- OpenFeign
+- Resilience4j
+- Micrometer
+
+### Frontend
+
+- React 18
+- Vite
+- Tailwind CSS
+
+### Data And Messaging
+
+- MySQL 8
+- Redis 7
+- Apache Kafka
+- ZooKeeper
+
+### Platform And Monitoring
+
+- Docker
+- Docker Compose
+- Prometheus
+- Grafana
+- Nginx
+
+### Testing
+
+- JUnit 5
+- Mockito
+- Spring Boot Test
+- MockMvc
+- H2
+- JaCoCo
+
+## Tools And Libraries
+
+This section lists the main tools and libraries used across the repository.
+
+### Spring And Java Libraries
+
+- `spring-boot-starter-web`
+- `spring-boot-starter-security`
+- `spring-boot-starter-data-jpa`
+- `spring-boot-starter-actuator`
+- `spring-cloud-starter-netflix-eureka-server`
+- `spring-cloud-starter-netflix-eureka-client`
+- `spring-cloud-starter-gateway`
+- `spring-cloud-starter-openfeign`
+- `resilience4j-spring-boot`
+- `micrometer-registry-prometheus`
+- JWT support libraries
+
+### Frontend Libraries
+
+- `react`
+- `react-dom`
+- `vite`
+- `tailwindcss`
+- `postcss`
+- `autoprefixer`
+
+### Operational Tooling
+
+- Nginx for serving the built frontend
+- Prometheus for scraping metrics
+- Grafana for dashboards
+- Docker Compose for orchestration
+- Maven for Java builds
+- npm for frontend dependency management
+
+## Security
+
+Security is enforced primarily at the gateway and service layer.
+
+### JWT
+
+- login returns a JWT
+- protected routes require `Authorization: Bearer <token>`
+- gateway validates token signature and expiry
+- backend services also validate JWT where required
+
+### Public Routes
+
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+
+### Protected Routes
+
+- all other `/api/**` routes
+
+### Role Rules
+
+- `TELLER`
+  - can create transactions
+  - can view transactions
+- `ADMIN`
+  - can create transactions
+  - can view transactions
+  - can access protected actuator endpoints on the payment service
+- `CUSTOMER`
+  - can view transactions
+  - cannot create transactions
+
+### Gateway Protections
+
+- JWT validation
+- rate limiting: `10` requests per second per IP
+- correlation ID propagation
+
+### Logging Compliance
+
+- passwords must never be logged
+- full account numbers must not be logged
+- account numbers are masked in service logs
+- correlation IDs are added to logs for traceability
+
+## Messaging And Data Flow
+
+### Transaction Flow
+
+1. user submits transaction through the frontend
+2. frontend calls the gateway
+3. gateway routes to `banking-payment-service`
+4. payment service checks JWT and role
+5. payment service uses Feign to verify the account via `banking-account-service`
+6. payment service validates active status and available balance
+7. payment service updates balance through account service
+8. payment service stores transaction state
+9. payment service publishes Kafka events
+10. audit consumers persist audit entries
+
+### Kafka Usage
+
+Kafka is used for:
+
+- transaction initiated events
+- transaction completed events
+- audit events
+- downstream notification or audit consumers
+
+## Observability
+
+Observability is implemented across the services.
+
+### Logging
+
+- Logback configuration per service
+- structured format with:
+  - timestamp
+  - level
+  - correlation ID
+  - service
+  - class
+  - message
+
+### Metrics
+
+Exposed through:
+
+```text
+/actuator/prometheus
+```
+
+Important metrics include:
+
+- transaction counters
+- failed transaction counters
+- transaction processing timer
+- Kafka consumer lag gauge
+- JVM metrics
+- HTTP request metrics
+- Resilience4j circuit breaker state metrics
+
+### Health
+
+Exposed through:
+
+```text
+/actuator/health
+```
+
+Custom health indicators:
+
+- database health
+- Kafka health
+
+### Dashboards
+
+Grafana dashboard tracks:
+
+- transaction success rate
+- transaction processing time
+- JVM memory usage
+- Kafka consumer lag
+- circuit breaker state
+
+## Testing And Quality
+
+The payment service includes a strong test suite.
+
+### Unit Tests
+
+- transaction service
+- JWT provider
+- transaction analyzer
+
+### Integration Tests
+
+- secured endpoint flow with valid JWT
+- unauthorized flow
+- forbidden flow
+- transaction retrieval
+
+### Repository Tests
+
+- JPA repository methods
+- custom query behavior
+
+### Coverage
+
+- JaCoCo report generation
+- minimum target of `80%`
 
 ## Project Structure
 
 ```text
 banking-project-springboot/
-|-- banking-eureka-server/
+|-- banking-account-service/
 |   |-- src/main/java/
 |   |-- src/main/resources/
 |   |-- Dockerfile
@@ -76,245 +410,141 @@ banking-project-springboot/
 |   |-- src/main/resources/
 |   |-- Dockerfile
 |   `-- pom.xml
-|-- banking-payment-service/
+|-- banking-eureka-server/
 |   |-- src/main/java/
 |   |-- src/main/resources/
 |   |-- Dockerfile
 |   `-- pom.xml
-|-- banking-account-service/
+|-- banking-payment-service/
 |   |-- src/main/java/
 |   |-- src/main/resources/
 |   |-- Dockerfile
 |   `-- pom.xml
 |-- banking-frontend/
 |   |-- src/
+|   |-- public/
+|   |-- Dockerfile
+|   |-- nginx.conf
 |   |-- package.json
-|   |-- tailwind.config.js
 |   `-- vite.config.js
 |-- infra/
-|   `-- mysql-init/
-|       `-- 01-create-databases.sql
+|   |-- grafana/
+|   |-- mysql-init/
+|   `-- prometheus/
 |-- docker-compose.yml
 |-- .env
 |-- .gitignore
 `-- README.md
 ```
 
-## Technology Stack
+## Ports
 
-- Java 17
-- Spring Boot 3.4.4
-- Spring Cloud 2024.0.1
-- Netflix Eureka
-- Spring Cloud Gateway
-- Spring Security with JWT
-- OpenFeign
-- Resilience4j
-- Spring Data JPA
-- Flyway
-- MySQL 8.4
-- Redis
-- Apache Kafka
-- Docker Compose
-- React 18
-- Vite
-- Tailwind CSS
+### Public Ports
 
-## Runtime Ports
-
-Public:
-
+- Frontend: `5173`
 - API Gateway: `8080`
-- Frontend Dev Server: `5173`
 - Eureka Dashboard: `8761`
+- Grafana: `3000`
+- Prometheus: `9090`
 - MySQL: `3306`
 - Redis: `6379`
 - Kafka: `9092`
 - ZooKeeper: `2181`
 
-Internal Docker network:
+### Internal Service Ports
 
-- Payment Service: `8081`
-- Account Service: `8082`
+- Payment service: `8081`
+- Account service: `8082`
 - Kafka internal listener: `29092`
-
-## Databases
-
-The MySQL init script creates two schemas:
-
-- `banking_payments_db`
-- `banking_accounts_db`
-
-Source file:
-
-- [`infra/mysql-init/01-create-databases.sql`](./infra/mysql-init/01-create-databases.sql)
 
 ## Environment Variables
 
-All runtime variables are defined in the root `.env` file.
+The root `.env` file is the main source of runtime configuration for Docker.
 
-Key variables:
+Important variables:
 
+- `SPRING_PROFILES_ACTIVE`
 - `MYSQL_ROOT_PASSWORD`
+- `MYSQL_PORT`
+- `DB_HOST`
+- `DB_PORT`
+- `DB_USERNAME`
 - `DB_PASSWORD`
-- `JWT_SECRET`
 - `PAYMENT_DB_NAME`
 - `ACCOUNT_DB_NAME`
-- `EUREKA_SERVER_URL`
+- `JWT_SECRET`
+- `REDIS_HOST`
+- `REDIS_PORT`
+- `ZOOKEEPER_PORT`
+- `KAFKA_PORT`
+- `KAFKA_INTERNAL_PORT`
 - `KAFKA_BOOTSTRAP_SERVERS`
+- `EUREKA_SERVER_PORT`
+- `EUREKA_SERVER_URL`
 - `GATEWAY_PORT`
+- `FRONTEND_PORT`
+- `PAYMENT_SERVICE_PORT`
+- `ACCOUNT_SERVICE_PORT`
+- `PROMETHEUS_PORT`
+- `GRAFANA_PORT`
+- `GRAFANA_ADMIN_USER`
+- `GRAFANA_ADMIN_PASSWORD`
 
-The compose file reads these variables and injects them into the containers.
+## Quick Start
 
-## Docker Compose Services
+### Prerequisites
 
-The root compose file starts:
+Install:
 
-- `mysql`
-- `redis`
-- `zookeeper`
-- `kafka`
-- `eureka-server`
-- `api-gateway`
-- `frontend`
-- `payment-service`
-- `account-service`
+- Docker Desktop
+- Java 17
+- Maven
+- Node.js 20 or later
+- npm
 
-### Persistence
-
-The Compose stack persists MySQL data using:
-
-- `mysql-data`
-
-## Security and Routing
-
-### Gateway Routes
-
-- `/api/auth/**` -> `banking-payment-service`
-- `/api/payments/**` -> `banking-payment-service`
-- `/api/accounts/**` -> `banking-account-service`
-
-### JWT Behavior
-
-Public gateway endpoints:
-
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-
-Protected:
-
-- all other `/api/**` routes require `Authorization: Bearer <token>`
-
-Invalid or expired token:
-
-- gateway returns `401`
-
-### Rate Limit
-
-- max `10` requests per second per IP
-- excess requests return `429`
-
-### Correlation ID
-
-- gateway forwards incoming `X-Correlation-ID`
-- if absent, gateway generates a UUID
-- gateway adds `X-Correlation-ID` to forwarded requests and responses
-- payment and account services log the correlation ID
-
-## Service Discovery
-
-Registered in Eureka:
-
-- `BANKING-EUREKA-SERVER` is the registry itself and exposed at `http://localhost:8761`
-- `BANKING-API-GATEWAY`
-- `BANKING-PAYMENT-SERVICE`
-- `BANKING-ACCOUNT-SERVICE`
-
-Feign in payment service resolves account service by service name through Eureka.
-
-## Build and Run
-
-### Build JARs
+### Start Everything With Docker
 
 From the repository root:
-
-```powershell
-mvn -q -DskipTests -f banking-eureka-server\pom.xml package
-mvn -q -DskipTests -f banking-api-gateway\pom.xml package
-mvn -q -DskipTests -f banking-account-service\pom.xml package
-mvn -q -DskipTests -f banking-payment-service\pom.xml package
-```
-
-### Start the Full Stack
 
 ```powershell
 docker compose up -d --build
 ```
 
-### Open the Frontend
+### Main URLs
 
-After Docker starts, open:
+- Frontend: `http://localhost:5173`
+- Gateway: `http://localhost:8080`
+- Eureka: `http://localhost:8761`
+- Grafana: `http://localhost:3000`
+- Prometheus: `http://localhost:9090`
 
-```text
-http://localhost:5173
-```
-
-The Dockerized frontend serves the React build through Nginx and proxies `/api/**` and `/actuator/**` to the API gateway.
-
-### Frontend Local Dev Mode
-
-Use this only when you want hot reload during frontend development:
-
-```powershell
-cd banking-frontend
-npm install
-npm run dev
-```
-
-Vite dev mode also proxies `/api/**` and `/actuator/**` to `http://localhost:8080`.
-
-### Check Container Health
+### Check Status
 
 ```powershell
 docker compose ps -a
 ```
 
-### Stop the Stack
+### Stop The Stack
 
 ```powershell
 docker compose down
 ```
 
-### Stop and Remove MySQL Volume
+### Reset All Data
 
 ```powershell
 docker compose down -v
 ```
 
-## API Summary
-
-All client traffic should go through the gateway.
-
-The frontend follows the same rule and talks only to routed gateway paths.
-
 ## Frontend Usage Guide
 
-The intended day-to-day entry point is the frontend:
+The recommended way to use the system is through:
 
 ```text
 http://localhost:5173
 ```
 
-### What the frontend does
-
-- registers and logs in users through the gateway
-- stores the JWT in browser local storage for the current browser session
-- creates and loads accounts through account-service routes
-- posts transactions through payment-service routes
-- shows recent transactions for the selected account
-- shows a live gateway health snapshot from `/actuator/health`
-
-### Recommended first-time flow
+### First-Time Operator Flow
 
 1. Start the full stack:
 
@@ -322,17 +552,19 @@ http://localhost:5173
 docker compose up -d --build
 ```
 
-2. Open the UI:
+2. Open the frontend:
 
 ```text
 http://localhost:5173
 ```
 
-3. In `Authentication desk`, create a user.
-Recommended role:
+3. In `Authentication desk`, register a user.
+
+Recommended initial role:
+
 - `TELLER`
 
-Use example values:
+Example:
 
 ```text
 Username: teller1
@@ -340,16 +572,17 @@ Password: Password123
 Role: TELLER
 ```
 
-4. In `Open session`, log in with the same credentials.
+4. Log in with the same credentials in `Open session`.
 
 Expected result:
-- the UI shows `Signed in as teller1`
-- the role appears in the auth panel
-- account and transaction actions are now enabled
 
-5. In `Create a fresh account`, create an account if you do not already have one.
+- the UI shows the signed-in username
+- the role is displayed
+- account and transaction features become available
 
-Example values:
+5. In `Create a fresh account`, create an account.
+
+Example:
 
 ```text
 Account number: ACC1001
@@ -358,44 +591,36 @@ Opening balance: 5000.00
 Status: ACTIVE
 ```
 
-Expected result:
-- the account is created
-- the selected account card updates
-- the account number becomes the active account in the dashboard
+6. Use `Lookup and inspect` to load an existing account later.
 
-6. In `Lookup and inspect`, you can reload any existing account by entering its account number and clicking `Load account`.
+7. Use `Post a transaction` to create a debit or credit.
 
-7. In `Post a transaction`, enter:
+Example:
 
 ```text
 Amount: 100.00
 Type: DEBIT
 ```
 
-Then click `Submit transaction`.
+8. Check `Recent transactions` for the refreshed ledger list.
 
-Expected result:
-- a success banner appears
-- account balance refreshes automatically
-- the recent transactions table updates
+9. Check `Gateway health snapshot` to confirm gateway readiness.
 
-### Role behavior
+### Notes
 
-- `TELLER`: can create transactions and view transactions
-- `ADMIN`: can create transactions and view transactions
-- `CUSTOMER`: can view transactions but cannot create transactions
+- the frontend stores the JWT in browser local storage
+- the frontend talks only to the gateway
+- account and transaction actions require login
+- transactions require a currently loaded account
+- customer-role users can view but not create transactions
 
-If you log in as `CUSTOMER`, transaction submission will fail with `403 Forbidden`.
+## API Guide
 
-### Notes while using the UI
+All client-facing APIs should be accessed through the gateway.
 
-- account lookup and creation require a valid login
-- transaction submission requires an active loaded account
-- account numbers and balances shown in the UI are live values returned from the backend
-- the frontend talks only to the gateway, not directly to internal services
-- if the gateway or backend is unavailable, the UI shows an error banner with the backend message
+### Authentication
 
-### Register
+#### Register
 
 ```text
 POST http://localhost:8080/api/auth/register
@@ -411,7 +636,7 @@ Example payload:
 }
 ```
 
-### Login
+#### Login
 
 ```text
 POST http://localhost:8080/api/auth/login
@@ -426,13 +651,34 @@ Example payload:
 }
 ```
 
-### Get Account
+### Accounts
+
+#### Get Account
 
 ```text
 GET http://localhost:8080/api/accounts/ACC1001
 ```
 
-### Create Transaction
+#### Create Account
+
+```text
+POST http://localhost:8080/api/accounts
+```
+
+Example payload:
+
+```json
+{
+  "accountNumber": "ACC1001",
+  "accountHolderName": "Demo Customer",
+  "balance": 5000.00,
+  "status": "ACTIVE"
+}
+```
+
+### Transactions
+
+#### Create Transaction
 
 ```text
 POST http://localhost:8080/api/payments/transactions
@@ -448,189 +694,140 @@ Example payload:
 }
 ```
 
-Recommended headers:
+#### Get Transactions By Account
+
+```text
+GET http://localhost:8080/api/payments/transactions/account/ACC1001
+```
+
+### Recommended Headers
 
 ```text
 Authorization: Bearer <jwt>
-Idempotency-Key: <valid UUID>
+Idempotency-Key: <uuid>
 X-Correlation-ID: <optional client value>
 ```
 
-## Functional Validation Guide
+## Operations
 
-### 1. Start the stack
+### Eureka Dashboard
 
-```powershell
-docker compose up -d --build
-```
-
-### 2. Open Eureka dashboard
+Open:
 
 ```text
 http://localhost:8761
 ```
 
-Expected result:
+Expected registered services:
 
-- `BANKING-API-GATEWAY` -> `UP`
-- `BANKING-PAYMENT-SERVICE` -> `UP`
-- `BANKING-ACCOUNT-SERVICE` -> `UP`
+- `BANKING-API-GATEWAY`
+- `BANKING-PAYMENT-SERVICE`
+- `BANKING-ACCOUNT-SERVICE`
 
-### 3. Register a user
+### Grafana
 
-```powershell
-$register = @{
-  username = "teller1"
-  password = "Password123"
-  role     = "TELLER"
-} | ConvertTo-Json
+Open:
 
-Invoke-RestMethod `
-  -Method Post `
-  -Uri "http://localhost:8080/api/auth/register" `
-  -ContentType "application/json" `
-  -Body $register
+```text
+http://localhost:3000
 ```
 
-### 4. Login and get JWT
+Default credentials come from `.env`:
 
-```powershell
-$login = @{
-  username = "teller1"
-  password = "Password123"
-} | ConvertTo-Json
+- username: `admin`
+- password: `banking-grafana-admin-password`
 
-$auth = Invoke-RestMethod `
-  -Method Post `
-  -Uri "http://localhost:8080/api/auth/login" `
-  -ContentType "application/json" `
-  -Body $login
+### Prometheus
 
-$token = $auth.token
+Open:
+
+```text
+http://localhost:9090
 ```
 
-### 5. Create transaction through gateway
+### Useful Commands
+
+Check containers:
 
 ```powershell
-$tx = @{
-  accountNumber = "ACC1001"
-  amount        = 100.00
-  type          = "DEBIT"
-} | ConvertTo-Json
-
-Invoke-RestMethod `
-  -Method Post `
-  -Uri "http://localhost:8080/api/payments/transactions" `
-  -Headers @{
-    Authorization      = "Bearer $token"
-    "Idempotency-Key" = "77777777-7777-7777-7777-777777777777"
-    "X-Correlation-ID" = "phase9-demo-001"
-  } `
-  -ContentType "application/json" `
-  -Body $tx
+docker compose ps -a
 ```
 
-### 6. Verify Kafka event flow
-
-Check payment-service logs:
+Check payment logs:
 
 ```powershell
 docker compose logs payment-service --tail=200
 ```
 
-Look for:
-
-- `Published event INITIATED ... payment.transaction.initiated`
-- `Published event INITIATED ... payment.audit.events`
-- `Published event COMPLETED ... payment.transaction.completed`
-- `Published event COMPLETED ... payment.audit.events`
-
-### 7. Verify audit log persistence
+Check gateway logs:
 
 ```powershell
-docker compose exec -T mysql mysql -uroot -p<MYSQL_ROOT_PASSWORD> -D banking_payments_db -e "SELECT id, transaction_id, account_number, event_type, topic_name FROM audit_logs ORDER BY id DESC LIMIT 5;"
+docker compose logs api-gateway --tail=200
 ```
 
-Expected result:
-
-- rows exist in `audit_logs`
-- both `INITIATED` and `COMPLETED` events are persisted
-
-### 8. Verify circuit breaker
-
-Stop account service:
+Check frontend logs:
 
 ```powershell
-docker compose stop account-service
+docker compose logs frontend --tail=200
 ```
 
-Send multiple gateway transaction requests.
-
-Expected result:
-
-- first request retries and then returns `503`
-- later requests return `503` quickly after the breaker opens
-- payment logs show `CLOSED -> OPEN`
-
-Restart account service:
+Query audit rows:
 
 ```powershell
-docker compose start account-service
+docker compose exec -T mysql mysql -uroot -p<MYSQL_ROOT_PASSWORD> -D banking_payments_db -e "SELECT id, transaction_id, account_number, event_type, topic_name FROM audit_logs ORDER BY id DESC LIMIT 10;"
 ```
 
-Wait for health and send another transaction.
+## Troubleshooting
 
-Expected result:
+### `localhost:5173` not opening
 
-- payment logs show `OPEN -> HALF_OPEN`
-- recovery transaction succeeds
-- payment logs show `HALF_OPEN -> CLOSED`
+- make sure the `frontend` container is running
+- run `docker compose ps -a`
+- run `docker compose up -d --build frontend`
 
-## Verified Local Result
+### Login works but transaction creation fails with `403`
 
-Verified in Docker on `March 22, 2026`:
+- your logged-in role is probably `CUSTOMER`
+- use `TELLER` or `ADMIN` for transaction creation
 
-- all containers reached healthy state through `docker compose`
-- all four service Dockerfiles built on `amazoncorretto:17`
-- Eureka dashboard showed payment, account, and gateway as `UP`
-- user registration and login worked through the gateway
-- transaction creation through the gateway returned `SUCCESS`
-- payment logs showed Kafka event publication for `INITIATED` and `COMPLETED`
-- payment logs showed `Audit event consumed for account ACC1001 on topic payment.audit.events`
-- MySQL query returned audit rows in `banking_payments_db.audit_logs`
-- stopping account-service produced `503` responses and opened the circuit breaker
-- after account-service restart, the breaker moved `OPEN -> HALF_OPEN -> CLOSED`
+### Transaction creation fails with `401`
 
-## Operational Notes
+- the JWT may be missing or expired
+- log in again from the frontend
 
-- use only the root Compose file
-- client traffic should go through the gateway
-- payment and account services are internal-only in Compose
-- `.env` is the source of runtime environment values for local Docker runs
-- if Kafka fails after an unclean restart, restart `zookeeper` first and then start `kafka`
-- `docker compose down -v` is the clean reset path when you need MySQL to re-run schema initialization
+### Transaction creation fails with `503`
 
-## Maintenance Standard
+- account service may be unavailable
+- check:
+  - `docker compose ps -a`
+  - `docker compose logs payment-service --tail=200`
+  - `docker compose logs account-service --tail=200`
 
-Keep this README current whenever the project changes.
+### Kafka fails after restart
 
-Update this document whenever these change:
+- restart `zookeeper` first
+- then start `kafka`
 
-- service names
+### Need a clean reset
+
+```powershell
+docker compose down -v
+docker compose up -d --build
+```
+
+## Maintenance Notes
+
+This README should remain the single source of truth for:
+
+- architecture
 - ports
-- Docker images
 - environment variables
-- healthchecks
-- route mappings
-- JWT or gateway behavior
-- database names
-- Compose startup dependencies
-- verification commands
+- service responsibilities
+- frontend usage
+- auth behavior
+- gateway routes
+- observability setup
+- Docker commands
+- troubleshooting steps
 
-When updating in future, keep it professional:
-
-- document actual current behavior
-- prefer repository-root commands
-- keep one source of truth for Docker runtime instructions
-- include real request examples for externally used endpoints
-- record operational caveats and recovery steps
+Whenever the project changes, update this document to reflect actual current behavior, not intended behavior.

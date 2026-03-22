@@ -1,0 +1,50 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: banking-api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: payment-service
+          uri: lb://banking-payment-service
+          predicates:
+            - Path=/api/payments/**
+          filters:
+            - RewritePath=/api/payments/?(?<segment>.*), /api/$\{segment}
+        - id: account-service
+          uri: lb://banking-account-service
+          predicates:
+            - Path=/api/accounts/**
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:banking-payment-service-jwt-secret-key-change-me-1234567890}
+
+eureka:
+  instance:
+    prefer-ip-address: true
+  client:
+    service-url:
+      defaultZone: ${EUREKA_SERVER_URL:http://localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+
+logging:
+  pattern:
+    level: "%5p [corr:%X{correlationId:-N/A}]"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
+  endpoint:
+    health:
+      show-details: always
+
+info:
+  app:
+    name: banking-api-gateway
+    description: API gateway for the banking platform

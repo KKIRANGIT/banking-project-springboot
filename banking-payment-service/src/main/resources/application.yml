@@ -45,9 +45,14 @@ security:
     secret: ${JWT_SECRET:banking-payment-service-jwt-secret-key-change-me-1234567890}
     expiration-ms: 86400000
 
-services:
-  account-service:
-    url: ${ACCOUNT_SERVICE_URL:http://localhost:8082}
+eureka:
+  instance:
+    prefer-ip-address: true
+  client:
+    service-url:
+      defaultZone: ${EUREKA_SERVER_URL:http://localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
 
 resilience4j:
   retry:
@@ -84,6 +89,10 @@ resilience4j:
         ignore-exceptions:
           - com.example.bankingpaymentservice.exception.AccountClientNotFoundException
 
+logging:
+  pattern:
+    level: "%5p [corr:%X{correlationId:-N/A}]"
+
 management:
   endpoints:
     web:
@@ -96,7 +105,7 @@ management:
 info:
   app:
     name: banking-payment-service
-    description: Banking payment service with JWT, async checks, Redis, and Kafka support
+    description: Banking payment service with JWT, async checks, Redis, Kafka, and Eureka support
 
 ---
 spring:

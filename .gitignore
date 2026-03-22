@@ -27,3 +27,5 @@ secrets/
 .m2/
 .m2-account/
 .m2-payment/
+.m2-eureka/
+.m2-gateway/

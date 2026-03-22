@@ -68,6 +68,13 @@ services:
       timeout: 10s
       retries: 10
 
+  eureka-server:
+    build:
+      context: ./banking-eureka-server
+    container_name: banking-eureka-server
+    ports:
+      - "8761:8761"
+
   account-service:
     build:
       context: ./banking-account-service
@@ -75,6 +82,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      eureka-server:
+        condition: service_started
     environment:
       SPRING_PROFILES_ACTIVE: prod
       DB_HOST: mysql
@@ -83,8 +92,9 @@ services:
       DB_USERNAME: root
       DB_PASSWORD: root
       JWT_SECRET: banking-payment-service-jwt-secret-key-change-me-1234567890
-    ports:
-      - "8082:8082"
+      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+    expose:
+      - "8082"
 
   payment-service:
     build:
@@ -97,6 +107,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      eureka-server:
+        condition: service_started
       account-service:
         condition: service_started
     environment:
@@ -110,9 +122,26 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      ACCOUNT_SERVICE_URL: http://account-service:8082
+      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+    expose:
+      - "8081"
+
+  api-gateway:
+    build:
+      context: ./banking-api-gateway
+    container_name: banking-api-gateway
+    depends_on:
+      eureka-server:
+        condition: service_started
+      account-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+    environment:
+      JWT_SECRET: banking-payment-service-jwt-secret-key-change-me-1234567890
+      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
     ports:
-      - "8081:8081"
+      - "8080:8080"
 
 volumes:
   mysql-data:

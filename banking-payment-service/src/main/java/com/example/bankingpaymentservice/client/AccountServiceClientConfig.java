@@ -11,6 +11,8 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 public class AccountServiceClientConfig {
 
+    private static final String CORRELATION_ID_HEADER = "X-Correlation-ID";
+
     @Bean
     public RequestInterceptor accountServiceAuthPropagationInterceptor() {
         return requestTemplate -> {
@@ -20,6 +22,11 @@ public class AccountServiceClientConfig {
                 String authorizationHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
                 if (authorizationHeader != null && !authorizationHeader.isBlank()) {
                     requestTemplate.header(HttpHeaders.AUTHORIZATION, authorizationHeader);
+                }
+
+                String correlationId = request.getHeader(CORRELATION_ID_HEADER);
+                if (correlationId != null && !correlationId.isBlank()) {
+                    requestTemplate.header(CORRELATION_ID_HEADER, correlationId);
                 }
             }
         };

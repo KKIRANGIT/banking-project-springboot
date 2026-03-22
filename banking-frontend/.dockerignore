@@ -1,0 +1,6 @@
+node_modules
+dist
+.vite
+frontend-dev.log
+frontend-dev.err.log
+npm-debug.log*

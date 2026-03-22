@@ -21,6 +21,10 @@ This repository contains four Spring Boot services and one shared Docker Compose
   - Account lookup and balance service
   - Internal port `8082`
   - Uses MySQL, JWT validation, Eureka
+- `banking-frontend`
+  - React + Tailwind operator dashboard
+  - Public port `5173`
+  - Uses the API gateway as its backend entry point
 
 All services are Dockerized and started from the single root [`docker-compose.yml`](./docker-compose.yml).
 
@@ -50,6 +54,7 @@ Each application container includes a Docker `HEALTHCHECK` instruction:
 - Gateway: `http://localhost:8080/actuator/health`
 - Payment: `http://localhost:8081/actuator/health`
 - Account: `http://localhost:8082/actuator/health`
+- Frontend: `http://localhost/`
 
 Compose also waits on health where it matters:
 
@@ -81,6 +86,11 @@ banking-project-springboot/
 |   |-- src/main/resources/
 |   |-- Dockerfile
 |   `-- pom.xml
+|-- banking-frontend/
+|   |-- src/
+|   |-- package.json
+|   |-- tailwind.config.js
+|   `-- vite.config.js
 |-- infra/
 |   `-- mysql-init/
 |       `-- 01-create-databases.sql
@@ -106,12 +116,16 @@ banking-project-springboot/
 - Redis
 - Apache Kafka
 - Docker Compose
+- React 18
+- Vite
+- Tailwind CSS
 
 ## Runtime Ports
 
 Public:
 
 - API Gateway: `8080`
+- Frontend Dev Server: `5173`
 - Eureka Dashboard: `8761`
 - MySQL: `3306`
 - Redis: `6379`
@@ -162,6 +176,7 @@ The root compose file starts:
 - `kafka`
 - `eureka-server`
 - `api-gateway`
+- `frontend`
 - `payment-service`
 - `account-service`
 
@@ -175,6 +190,7 @@ The Compose stack persists MySQL data using:
 
 ### Gateway Routes
 
+- `/api/auth/**` -> `banking-payment-service`
 - `/api/payments/**` -> `banking-payment-service`
 - `/api/accounts/**` -> `banking-account-service`
 
@@ -182,8 +198,8 @@ The Compose stack persists MySQL data using:
 
 Public gateway endpoints:
 
-- `POST /api/payments/auth/register`
-- `POST /api/payments/auth/login`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
 
 Protected:
 
@@ -235,6 +251,28 @@ mvn -q -DskipTests -f banking-payment-service\pom.xml package
 docker compose up -d --build
 ```
 
+### Open the Frontend
+
+After Docker starts, open:
+
+```text
+http://localhost:5173
+```
+
+The Dockerized frontend serves the React build through Nginx and proxies `/api/**` and `/actuator/**` to the API gateway.
+
+### Frontend Local Dev Mode
+
+Use this only when you want hot reload during frontend development:
+
+```powershell
+cd banking-frontend
+npm install
+npm run dev
+```
+
+Vite dev mode also proxies `/api/**` and `/actuator/**` to `http://localhost:8080`.
+
 ### Check Container Health
 
 ```powershell
@@ -257,10 +295,110 @@ docker compose down -v
 
 All client traffic should go through the gateway.
 
+The frontend follows the same rule and talks only to routed gateway paths.
+
+## Frontend Usage Guide
+
+The intended day-to-day entry point is the frontend:
+
+```text
+http://localhost:5173
+```
+
+### What the frontend does
+
+- registers and logs in users through the gateway
+- stores the JWT in browser local storage for the current browser session
+- creates and loads accounts through account-service routes
+- posts transactions through payment-service routes
+- shows recent transactions for the selected account
+- shows a live gateway health snapshot from `/actuator/health`
+
+### Recommended first-time flow
+
+1. Start the full stack:
+
+```powershell
+docker compose up -d --build
+```
+
+2. Open the UI:
+
+```text
+http://localhost:5173
+```
+
+3. In `Authentication desk`, create a user.
+Recommended role:
+- `TELLER`
+
+Use example values:
+
+```text
+Username: teller1
+Password: Password123
+Role: TELLER
+```
+
+4. In `Open session`, log in with the same credentials.
+
+Expected result:
+- the UI shows `Signed in as teller1`
+- the role appears in the auth panel
+- account and transaction actions are now enabled
+
+5. In `Create a fresh account`, create an account if you do not already have one.
+
+Example values:
+
+```text
+Account number: ACC1001
+Account holder name: Demo Customer
+Opening balance: 5000.00
+Status: ACTIVE
+```
+
+Expected result:
+- the account is created
+- the selected account card updates
+- the account number becomes the active account in the dashboard
+
+6. In `Lookup and inspect`, you can reload any existing account by entering its account number and clicking `Load account`.
+
+7. In `Post a transaction`, enter:
+
+```text
+Amount: 100.00
+Type: DEBIT
+```
+
+Then click `Submit transaction`.
+
+Expected result:
+- a success banner appears
+- account balance refreshes automatically
+- the recent transactions table updates
+
+### Role behavior
+
+- `TELLER`: can create transactions and view transactions
+- `ADMIN`: can create transactions and view transactions
+- `CUSTOMER`: can view transactions but cannot create transactions
+
+If you log in as `CUSTOMER`, transaction submission will fail with `403 Forbidden`.
+
+### Notes while using the UI
+
+- account lookup and creation require a valid login
+- transaction submission requires an active loaded account
+- account numbers and balances shown in the UI are live values returned from the backend
+- the frontend talks only to the gateway, not directly to internal services
+- if the gateway or backend is unavailable, the UI shows an error banner with the backend message
+
 ### Register
 
 ```text
-POST http://localhost:8080/api/payments/auth/register
+POST http://localhost:8080/api/auth/register
 ```
 
 Example payload:
@@ -276,7 +414,7 @@ Example payload:
 ### Login
 
 ```text
-POST http://localhost:8080/api/payments/auth/login
+POST http://localhost:8080/api/auth/login
 ```
 
 Example payload:
@@ -349,7 +487,7 @@ $register = @{
 
 Invoke-RestMethod `
   -Method Post `
-  -Uri "http://localhost:8080/api/payments/auth/register" `
+  -Uri "http://localhost:8080/api/auth/register" `
   -ContentType "application/json" `
   -Body $register
 ```
@@ -364,7 +502,7 @@ $login = @{
 
 $auth = Invoke-RestMethod `
   -Method Post `
-  -Uri "http://localhost:8080/api/payments/auth/login" `
+  -Uri "http://localhost:8080/api/auth/login" `
   -ContentType "application/json" `
   -Body $login
 

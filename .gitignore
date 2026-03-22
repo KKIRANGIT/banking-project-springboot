@@ -29,3 +29,8 @@ secrets/
 .m2-payment/
 .m2-eureka/
 .m2-gateway/
+
+# Frontend output
+banking-frontend/node_modules/
+banking-frontend/dist/
+banking-frontend/.vite/
